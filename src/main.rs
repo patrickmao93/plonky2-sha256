@@ -20,20 +20,28 @@ pub fn prove_sha256(msg: &[u8]) -> Result<()> {
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
-    let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
-    let targets = make_circuits(&mut builder, len as u64);
+    let config = CircuitConfig::standard_recursion_config();
+    println!("{:?}", config);
+
+    let mut builder = CircuitBuilder::<F, D>::new(config);
     let mut pw = PartialWitness::new();
-
-    for i in 0..len {
-        pw.set_bool_target(targets.message[i], msg_bits[i]);
-    }
-
     let expected_res = array_to_bits(hash.as_slice());
-    for i in 0..expected_res.len() {
-        if expected_res[i] {
-            builder.assert_one(targets.digest[i].target);
-        } else {
-            builder.assert_zero(targets.digest[i].target);
+    let mut targets = vec![];
+
+    for _ in 0..8 {
+        let curr = targets.len();
+        targets.push(make_circuits(&mut builder, len as u64));
+
+        for i in 0..len {
+            pw.set_bool_target(targets[curr].message[i], msg_bits[i]);
+        }
+
+        for i in 0..expected_res.len() {
+            if expected_res[i] {
+                builder.assert_one(targets[curr].digest[i].target);
+            } else {
+                builder.assert_zero(targets[curr].digest[i].target);
+            }
         }
     }
 
@@ -45,6 +53,7 @@ pub fn prove_sha256(msg: &[u8]) -> Result<()> {
     let timing = TimingTree::new("prove", Level::Debug);
     let proof = data.prove(pw).unwrap();
     timing.print();
+    println!("proof size {}", proof.to_bytes().len());
 
     let timing = TimingTree::new("verify", Level::Debug);
     let res = data.verify(proof);
@@ -60,7 +69,7 @@ fn main() -> Result<()> {
     builder.filter_level(LevelFilter::Debug);
     builder.try_init()?;
 
-    const MSG_SIZE: usize = 2828;
+    const MSG_SIZE: usize = 512;
     let mut msg = vec![0; MSG_SIZE as usize];
     for i in 0..MSG_SIZE - 1 {
         msg[i] = i as u8;

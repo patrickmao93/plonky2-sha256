@@ -1,12 +1,16 @@
+use std::io::Write;
+use std::fs::File;
+use std::path::Path;
 use anyhow::Result;
 use log::{Level, LevelFilter};
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::CircuitConfig;
+use plonky2::plonk::circuit_data::{CircuitConfig};
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::util::timing::TimingTree;
 use plonky2_sha256::circuit::{array_to_bits, make_circuits};
 use sha2::{Digest, Sha256};
+use plonky2_circom_verifier::verifier::{generate_verifier_config, generate_circom_verifier, generate_proof_base64};
 
 pub fn prove_sha256(msg: &[u8]) -> Result<()> {
     let mut hasher = Sha256::new();
@@ -20,7 +24,8 @@ pub fn prove_sha256(msg: &[u8]) -> Result<()> {
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
-    let config = CircuitConfig::standard_recursion_config();
+    let mut config = CircuitConfig::standard_recursion_config();
+    config.fri_config.rate_bits = 3;
     println!("{:?}", config);
 
     let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -28,7 +33,7 @@ pub fn prove_sha256(msg: &[u8]) -> Result<()> {
     let expected_res = array_to_bits(hash.as_slice());
     let mut targets = vec![];
 
-    for _ in 0..8 {
+    for _ in 0..1 {
         let curr = targets.len();
         targets.push(make_circuits(&mut builder, len as u64));
 
@@ -54,6 +59,26 @@ pub fn prove_sha256(msg: &[u8]) -> Result<()> {
     let proof = data.prove(pw).unwrap();
     timing.print();
     println!("proof size {}", proof.to_bytes().len());
+
+    let conf = generate_verifier_config(&proof)?;
+    let (circom_constants, circom_gates) = generate_circom_verifier(&conf, &data.common, &data.verifier_only)?;
+
+    let mut circom_file = File::create("./circom/circuits/constants.circom")?;
+    circom_file.write_all(circom_constants.as_bytes())?;
+    circom_file = File::create("./circom/circuits/gates.circom")?;
+    circom_file.write_all(circom_gates.as_bytes())?;
+
+    let proof_json = generate_proof_base64(&proof, &conf)?;
+
+    if !Path::new("./circom/test/data").is_dir() {
+        std::fs::create_dir("./circom/test/data")?;
+    }
+
+    let mut proof_file = File::create("./circom/test/data/proof.json")?;
+    proof_file.write_all(proof_json.as_bytes())?;
+
+    let mut conf_file = File::create("./circom/test/data/conf.json")?;
+    conf_file.write_all(serde_json::to_string(&conf)?.as_ref())?;
 
     let timing = TimingTree::new("verify", Level::Debug);
     let res = data.verify(proof);

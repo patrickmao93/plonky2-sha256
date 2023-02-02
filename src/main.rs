@@ -38,7 +38,7 @@ pub fn prove_sha256(msg: &[u8]) -> Result<()> {
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
-    let mut config = CircuitConfig::standard_recursion_config();
+    let config = CircuitConfig::standard_recursion_config();
     // config.fri_config.rate_bits = 3;
     println!("{:?}", config);
 
@@ -48,7 +48,7 @@ pub fn prove_sha256(msg: &[u8]) -> Result<()> {
     let mut targets = vec![];
 
 
-    for _ in 0..16 {
+    for _ in 0..2 {
         let curr = targets.len();
         targets.push(make_circuits(&mut builder, len as u64));
 
@@ -81,14 +81,14 @@ pub fn prove_sha256(msg: &[u8]) -> Result<()> {
     println!("middle proof steps {:?}", proof.0.proof.opening_proof.query_round_proofs[0].steps.len());
 
     let conf = generate_verifier_config(&proof.0)?;
-    let (circom_constants, circom_gates) = generate_circom_verifier(&conf, &proof.1, &proof.2)?;
+    let (circom_constants, circom_gates) = generate_circom_verifier(&conf, &proof.2, &proof.1)?;
 
     let mut circom_file = File::create("./circom/circuits/constants.circom")?;
     circom_file.write_all(circom_constants.as_bytes())?;
     circom_file = File::create("./circom/circuits/gates.circom")?;
     circom_file.write_all(circom_gates.as_bytes())?;
 
-    let proof_json = generate_proof_base64(&proof, &conf)?;
+    let proof_json = generate_proof_base64(&proof.0, &conf)?;
 
     if !Path::new("./circom/test/data").is_dir() {
         std::fs::create_dir("./circom/test/data")?;
